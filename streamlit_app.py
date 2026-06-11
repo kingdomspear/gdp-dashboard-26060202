@@ -3,66 +3,54 @@ import pandas as pd
 import math
 from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
 st.set_page_config(
     page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_icon=':earth_americas:',
 )
-
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
 
 @st.cache_data
 def get_gdp_data():
-    """Grab GDP data from a CSV file.
-
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
-
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
     DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
     raw_gdp_df = pd.read_csv(DATA_FILENAME)
 
     MIN_YEAR = 1960
     MAX_YEAR = 2022
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
     gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
+        ['Country Code', 'Country Name'],
         [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
         'Year',
         'GDP',
     )
 
-    # Convert years from string to integers
     gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
 
     return gdp_df
 
 gdp_df = get_gdp_data()
 
+code_to_name = (
+    gdp_df[['Country Code', 'Country Name']]
+    .drop_duplicates()
+    .set_index('Country Code')['Country Name']
+    .to_dict()
+)
+
+def format_gdp(value_usd):
+    if math.isnan(value_usd):
+        return 'n/a'
+    if abs(value_usd) >= 1e12:
+        return f'{value_usd / 1e12:,.2f}T'
+    elif abs(value_usd) >= 1e9:
+        return f'{value_usd / 1e9:,.2f}B'
+    elif abs(value_usd) >= 1e6:
+        return f'{value_usd / 1e6:,.2f}M'
+    else:
+        return f'{value_usd / 1e3:,.2f}K'
+
 # -----------------------------------------------------------------------------
 # Draw the actual page
 
-# Set the title that appears at the top of the page.
 '''
 # :earth_americas: GDP dashboard
 
@@ -71,7 +59,6 @@ notice, the data only goes to 2022 right now, and datapoints for certain years a
 But it's otherwise a great (and did I mention _free_?) source of data.
 '''
 
-# Add some spacing
 ''
 ''
 
@@ -92,13 +79,14 @@ if not len(countries):
 selected_countries = st.multiselect(
     'Which countries would you like to view?',
     countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
+    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'],
+    format_func=lambda code: code_to_name.get(code, code),
+)
 
 ''
 ''
 ''
 
-# Filter the data
 filtered_gdp_df = gdp_df[
     (gdp_df['Country Code'].isin(selected_countries))
     & (gdp_df['Year'] <= to_year)
@@ -113,12 +101,11 @@ st.line_chart(
     filtered_gdp_df,
     x='Year',
     y='GDP',
-    color='Country Code',
+    color='Country Name',
 )
 
 ''
 ''
-
 
 first_year = gdp_df[gdp_df['Year'] == from_year]
 last_year = gdp_df[gdp_df['Year'] == to_year]
@@ -133,8 +120,8 @@ for i, country in enumerate(selected_countries):
     col = cols[i % len(cols)]
 
     with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
+        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0]
+        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0]
 
         if math.isnan(first_gdp):
             growth = 'n/a'
@@ -144,8 +131,8 @@ for i, country in enumerate(selected_countries):
             delta_color = 'normal'
 
         st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
+            label=code_to_name.get(country, country),
+            value=format_gdp(last_gdp),
             delta=growth,
-            delta_color=delta_color
+            delta_color=delta_color,
         )
